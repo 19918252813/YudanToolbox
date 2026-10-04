@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">鱼蛋工具箱</string>
+    <string name="author_name">鱼蛋</string>
+    <string name="author_home">https://www.coolapk.com/u/42391964</string>
+    <string name="nav_home">功能</string>
+    <string name="nav_favorite">收藏</string>
+    <string name="nav_history">历史</string>
+    <string name="nav_settings">设置</string>
+</resources>

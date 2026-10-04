@@ -1,0 +1,96 @@
+name: 构建 APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    env:
+      GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: 缓存 Gradle 依赖
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: on-failure
+
+      - name: 准备 Gradle 8.9
+        # 仓库不含 gradle-wrapper.jar（二进制文件），这里确保 gradle 命令可用
+        run: |
+          if command -v gradle >/dev/null 2>&1; then
+            echo "环境已有 gradle: $(gradle --version 2>/dev/null | head -1)"
+          else
+            echo "下载 Gradle 8.9 ..."
+            curl -sL --retry 3 --retry-delay 5 --max-time 300 \
+              -o /tmp/gradle.zip \
+              https://services.gradle.org/distributions/gradle-8.9-bin.zip
+            unzip -q /tmp/gradle.zip -d "$HOME"
+            echo "$HOME/gradle-8.9/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/gradle-8.9/bin:$PATH"
+            echo "已安装: $(gradle --version 2>/dev/null | head -1)"
+          fi
+
+      - name: 生成 Gradle Wrapper
+        # 现场生成完整的 wrapper（含 jar），避免仓库缺二进制文件
+        continue-on-error: true
+        run: |
+          gradle wrapper --gradle-version 8.9 --distribution-type bin
+          chmod +x ./gradlew 2>/dev/null || true
+          ls -l gradlew gradle/wrapper/gradle-wrapper.jar 2>/dev/null || echo "wrapper 生成失败，将直接用 gradle 命令"
+
+      - name: 构建 APK
+        # 优先用 wrapper；wrapper 不可用时直接用 gradle 命令
+        # 构建 Debug 包：使用默认 debug 签名，无需配置密钥库，可直接安装
+        run: |
+          if [ -x ./gradlew ] && [ -f gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "=== 使用 ./gradlew 构建 ==="
+            ./gradlew assembleDebug --stacktrace --no-daemon
+          else
+            echo "=== wrapper 不可用，改用 gradle 命令构建 ==="
+            gradle assembleDebug --stacktrace --no-daemon
+          fi
+
+      - name: 整理产物
+        run: |
+          mkdir -p out
+          APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
+          if [ -z "$APK" ]; then
+            echo "找不到 APK"; find app/build/outputs -type f | head -20; exit 1
+          fi
+          cp "$APK" out/鱼蛋工具箱.apk
+          echo "产物: $APK"
+          ls -lh out/
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: 鱼蛋工具箱-APK
+          path: out/鱼蛋工具箱.apk
+          retention-days: 90
+
+      - name: 编译失败时上传诊断日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 编译错误日志
+          path: |
+            app/build/reports/
+            .gradle/
+          retention-days: 14
